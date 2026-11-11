@@ -102,10 +102,13 @@ function M.saveTab()
   end
 
   -- Record all window configs in json dictionary
+
+  local currentJsonDict = M._readData(opts.data_dir .. vim.t.name .. ".json")
   local jsonDic = M._recordTabInfo()
+  local newDict = vim.tbl_deep_extend('force', currentJsonDict, jsonDic)
 
   -- Save the info to a json file
-  M._recordJsonDict(jsonDic)
+  M._recordJsonDict(newDict)
 end
 
 function M._readData(fullDataFilePath)
