@@ -163,8 +163,140 @@ function M.loadTab()
   vim.api.nvim_win_close(orig_window, true)
 end
 
+function M.createBar()
+  -- Check that it's a valid named tab
+  if not vim.t.name then
+    vim.notify("Not a saved tab, cannot add a bar.", vim.log.levels.ERROR)
+    return false
+  end
+
+  -- Load the tab info
+  local tabDict = M._readData(opts.data_dir .. vim.t.name .. ".json")
+
+  -- Ask for bar type
+  local barType = ""
+  vim.ui.input({ prompt = "Enter bar type (b/t/r/l): " }, function(input)
+    if not input:match("[lrtb]") then
+      vim.notify(input .. " is not one of [btrl].. aborting.", vim.log.levels.ERROR)
+      return false
+    end
+    barType = input
+  end)
+
+  -- Create the bar window
+  local rows = vim.o.lines
+  local cols = vim.o.columns
+  local buf = vim.api.nvim_create_buf(false, true)
+
+  local config
+  if barType == "l" then
+    config = { split = "left", width = math.floor(cols * 0.2), win = -1 }
+  elseif barType == "r" then
+    config = { split = "right", width = math.floor(cols * 0.2), win = -1 }
+  elseif barType == "t" then
+    config = { split = "above", height = math.floor(rows * 0.2), win = -1 }
+  else
+    config = { split = "below", height = math.floor(rows * 0.2), win = -1 }
+  end
+
+  local winID = vim.api.nvim_open_win(buf, true, config)
+
+  -- save the configuration
+  tabDict[barType] = {
+    open = winID,
+    config = config
+  }
+  M._recordJsonDict(tabDict)
+end
+
+function M.barFinalize()
+  -- check we're in a valid named tab and read it's file
+  if not vim.t.name then
+    vim.notify("Not a saved tab, cannot add a bar.", vim.log.levels.ERROR)
+    return false
+  end
+  local tabDict = M._readData(opts.data_dir .. vim.t.name .. ".json")
+
+  -- Check we're in a bar and get the key of that bar
+  local curWin = vim.api.nvim_get_current_win()
+  local k = ""
+  for key, val in pairs(tabDict) do
+    if rawget(val, "open") ~= nil and val.open == curWin then
+      k = key
+    end
+  end
+  if k == "" then
+    vim.notify("Not a bar, must finalize a bar", vim.log.levels.ERROR)
+    return false
+  end
+
+  -- Set buffer name of bar
+  local bufName = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(curWin))
+  tabDict[k].bufName = bufName
+  M._recordJsonDict(tabDict)
+end
+
+function M.barToggle()
+  -- check we're in a valid named tab and read it's file
+  if not vim.t.name then
+    vim.notify("Not a saved tab, cannot add a bar.", vim.log.levels.ERROR)
+    return false
+  end
+  local tabDict = M._readData(opts.data_dir .. vim.t.name .. ".json")
+
+  -- Ask for which bar to toggle
+  local barType
+  vim.ui.input({ prompt = "Enter bar type (b/t/r/l): " }, function(input)
+    if not input:match("[lrtb]") then
+      vim.notify(input .. " is not one of [btrl].. aborting.", vim.log.levels.ERROR)
+      return false
+    end
+    barType = input
+  end)
+  if barType == nil then
+    vim.notify(input .. " is not one of [btrl].. aborting.", vim.log.levels.ERROR)
+    return false
+  end
+
+  -- Check it has anything set
+  if rawget(tabDict[barType], "open") == nil then
+    vim.notify("Cannot toggle " .. barType .. " tab because it was never created", vim.log.levels.ERROR)
+    return false
+  end
+  if tabDict[barType].open ~= -1 then -- Tab is open
+    vim.api.nvim_win_close(tabDict[barType].open, false)
+    tabDict[barType].open = -1
+    M._recordJsonDict(tabDict)
+  else --  tab is closed
+    if rawget(tabDict[barType], "bufName") == nil then
+      vim.notify("Cannot re-open " .. barType .. " tab because bufName was never set", vim.log.levels.ERROR)
+      return false
+    end
+    local buf = vim.fn.bufnr(tabDict[barType].bufName, 1)
+    local winID = vim.api.nvim_open_win(buf, false, tabDict[barType].config)
+    tabDict[barType].open = winID
+    M._recordJsonDict(tabDict)
+  end
+end
+
 function M.setup(user_opts)
   opts = vim.tbl_deep_extend("force", defaults, user_opts or {})
+  vim.api.nvim_create_autocmd("WinClosed", {
+    callback = function(args)
+      if not vim.t.name then
+        return false
+      end
+      local closed_win = tonumber(args.match)
+      local tabDict = M._readData(opts.data_dir .. vim.t.name .. ".json")
+      for key, val in pairs(tabDict) do
+        if rawget(val, "open") ~= nil and val.open == closed_win then
+          val.open = -1
+          M._recordJsonDict(tabDict)
+          return
+        end
+      end
+    end,
+  })
   vim.api.nvim_create_autocmd({ "ColorScheme", "VimEnter" }, {
     callback = function()
       vim.api.nvim_set_hl(0, "TabLineSel", { fg = "#ffffff", bg = "#000000", bold = true, nocombine = true })
